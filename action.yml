@@ -1,0 +1,81 @@
+# Validate OpenTelemetry Collector configs in CI, against the real collector binary.
+#
+# The API's distribution channel. A browser tab cannot fail a build; this can. It calls
+# POST /api/v1/validate for each config file, annotates the offending file on the PR with the
+# COLLECTOR'S OWN error, and fails the job.
+#
+# Composite, not Docker: a Docker action pays an image build on every run for what is three curl
+# calls, and runners already have curl and jq.
+#
+#   - uses: OllyStack/validate-otel-config@v1
+#     with:
+#       config: otel-config.yaml
+#       version: "0.157.0"
+#
+# The one thing to know about the exit behaviour: a 503 means NO VERDICT WAS PRODUCED, and this
+# action treats that as a failure rather than a pass. A validation step that goes green because the
+# validator was unreachable is worse than no step at all — it is a green tick that means nothing.
+# Set `fail-on-unavailable: false` if you would rather the build continue.
+name: Validate OTel Collector config
+description: Validate collector configs against a specific collector version, using the real binary.
+branding: {icon: check-circle, color: purple}
+
+inputs:
+  config:
+    description: Config file(s) to validate. Newline- or space-separated; globs are expanded.
+    required: false
+    default: otel-config.yaml
+  version:
+    description: Collector version to validate against (e.g. 0.157.0). Empty = the distribution default.
+    required: false
+    default: ""
+  distro:
+    description: otelcol-contrib (default), otelcol-core, managed, adot, splunk, edot.
+    required: false
+    default: otelcol-contrib
+  upgrade-to:
+    description: >
+      Also report what breaks moving from `version` to this version, and print the migrated config.
+      Advisory by default — set fail-on-upgrade to gate on it.
+    required: false
+    default: ""
+  fail-on-upgrade:
+    description: Fail when `upgrade-to` finds something needing a human decision.
+    required: false
+    default: "false"
+  fail-on-unavailable:
+    description: Fail when the service could not produce a verdict (503). Default true, on purpose.
+    required: false
+    default: "true"
+  feature-gates:
+    description: Comma-separated feature gates to pass to `validate`.
+    required: false
+    default: ""
+  api-url:
+    description: Base URL of the validation service (override to point at a self-hosted portal).
+    required: false
+    default: https://www.ollystack.com
+
+outputs:
+  valid:
+    description: '"true" only if every config validated. "false" otherwise.'
+    value: ${{ steps.run.outputs.valid }}
+  report:
+    description: Path to a JSON file with the full response for each config.
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        IN_CONFIG: ${{ inputs.config }}
+        IN_VERSION: ${{ inputs.version }}
+        IN_DISTRO: ${{ inputs.distro }}
+        IN_UPGRADE_TO: ${{ inputs.upgrade-to }}
+        IN_FAIL_UPGRADE: ${{ inputs.fail-on-upgrade }}
+        IN_FAIL_UNAVAILABLE: ${{ inputs.fail-on-unavailable }}
+        IN_GATES: ${{ inputs.feature-gates }}
+        IN_API: ${{ inputs.api-url }}
+      run: bash "$GITHUB_ACTION_PATH/validate.sh"

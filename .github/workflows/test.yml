@@ -1,0 +1,53 @@
+# The action's own tests, plus a live canary.
+#
+# An action's only bug report is "my CI went green when it shouldn't have", so the suite asserts
+# which cases FAIL the build — against a stub API, offline, in seconds.
+#
+# The canary then uses the action exactly as a consumer does (`uses: ./`) against the real service.
+# It is the only thing that can catch the failure this action cannot test for itself: the API
+# changing shape underneath it. Scheduled as well as on push, because that break would arrive on a
+# day nobody pushed here.
+name: test
+on:
+  push: {branches: [main]}
+  pull_request:
+  schedule: [{cron: "23 6 * * *"}]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: stubbed suite (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash test_action.sh
+
+  canary:
+    name: live canary (real service)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: A valid config must pass
+        uses: ./
+        with:
+          config: examples/valid.yaml
+          version: "0.157.0"
+      # An INVALID config must fail the step — asserted by inverting it. Without this the suite
+      # could pass with an action that always succeeds, which is the failure mode that matters.
+      - name: An invalid config must fail
+        id: bad
+        continue-on-error: true
+        uses: ./
+        with:
+          config: examples/invalid.yaml
+          version: "0.157.0"
+      - name: ...and that failure is the point
+        run: |
+          if [ "${{ steps.bad.outcome }}" != "failure" ]; then
+            echo "::error::the action PASSED a config the collector rejects — it is not validating"
+            exit 1
+          fi
+          echo "invalid config correctly failed the step"

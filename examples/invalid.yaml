@@ -1,0 +1,16 @@
+# The canary's negative case: `signalfx` is a receiver that existed in 0.155.0 and was REMOVED by
+# 0.157.0, so the real binary rejects this — which is exactly the class of break this action exists
+# to catch, and the reason it validates against a version you name rather than "latest".
+receivers:
+  otlp:
+    protocols:
+      grpc: {}
+  signalfx:
+    endpoint: 0.0.0.0:9943
+exporters:
+  debug: {}
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, signalfx]
+      exporters: [debug]

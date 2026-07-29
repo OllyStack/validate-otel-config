@@ -1,0 +1,15 @@
+# A minimal, valid collector config — the canary's positive case.
+receivers:
+  otlp:
+    protocols:
+      grpc: {}
+processors:
+  batch: {}
+exporters:
+  debug: {}
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
