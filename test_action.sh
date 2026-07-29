@@ -36,11 +36,20 @@ UPGRADE = {"from": "0.155.0", "to": "0.157.0", "ok": False,
            "applied": [], "manual": [{"kind": "component-removed"}],
            "migrated": "receivers: {}\n"}
 
+SEEN = {}
+
 class H(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("content-length", "0"))).decode()
         if "upgrade" in self.path:
             return self.send(200, UPGRADE)
+        # FLAKY: 502 on the first call, fine on the second — a deploy swapping containers underneath
+        # an in-flight request, which is what the canary caught in the wild.
+        if "FLAKY" in body:
+            SEEN["flaky"] = SEEN.get("flaky", 0) + 1
+            if SEEN["flaky"] == 1:
+                return self.send(502, {"error": "Bad Gateway"})
+            return self.send(200, VALID)
         if "BOOM" in body:
             return self.send(503, {"detail": {"error": "validation unavailable", "hint": "no oracle"}})
         if "signalfx" in body:
@@ -72,6 +81,7 @@ export RUNNER_TEMP="$TMP" GITHUB_OUTPUT="$TMP/out" GITHUB_STEP_SUMMARY="$TMP/sum
 printf 'receivers:\n  otlp: {}\n' > "$TMP/good.yaml"
 printf 'receivers:\n  signalfx: {}\n' > "$TMP/bad.yaml"
 printf 'receivers:\n  BOOM: {}\n' > "$TMP/unavailable.yaml"
+printf 'receivers:\n  FLAKY: {}\n' > "$TMP/flaky.yaml"
 
 echo
 echo "validate-otel-config action"
@@ -122,6 +132,14 @@ contains "...and includes the migrated config" "Migrated config" "$GITHUB_STEP_S
 : > "$GITHUB_OUTPUT"
 IN_CONFIG="$TMP/good.yaml" IN_UPGRADE_TO=0.157.0 IN_FAIL_UPGRADE=true bash "$HERE/validate.sh" > "$TMP/log8" 2>&1
 check "...and gates the build when asked to" 1 $?
+
+# A gateway error is the service being replaced, not an answer about the config. Our deploys are
+# frequent, so without this every consumer's CI fails on OUR release schedule — which is how the
+# canary found it, 29 seconds after a deploy.
+: > "$GITHUB_OUTPUT"
+IN_CONFIG="$TMP/flaky.yaml" bash "$HERE/validate.sh" > "$TMP/log9" 2>&1
+check "a transient 502 is retried, not reported as invalid" 0 $?
+contains "...and says it retried" "retrying in" "$TMP/log9"
 
 # --- the published copy must be complete ---------------------------------------------------------
 # sync.sh publishes an explicit file list. A runtime file missing from that list produces an action

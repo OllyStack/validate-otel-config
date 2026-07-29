@@ -43,16 +43,30 @@ done < <(printf '%s\n' $IN_CONFIG)
 api_call() {
   local url="$1" file="$2" dest="$3" out status
   # Retry once on 429: a busy minute should not fail someone's build.
-  for attempt in 1 2; do
+  for attempt in 1 2 3; do
     out="$(curl -sS --max-time 300 -w $'\n%{http_code}' -X POST "$url" \
             -H 'content-type: application/x-yaml' --data-binary @"$file" 2>&1)"
     status="${out##*$'\n'}"
     out="${out%$'\n'*}"
-    if [ "$status" = "429" ] && [ "$attempt" = 1 ]; then
+    if [ "$status" = "429" ] && [ "$attempt" != 3 ]; then
       echo "::notice::rate limited by $API — waiting 60s" >&2
       sleep 60
       continue
     fi
+    # A gateway error is the service being REPLACED, not an answer about your config: the platform
+    # swaps containers on every deploy and in-flight requests get a 502 for a few seconds. Found by
+    # this action's own canary, which failed 29 seconds after a deploy completed — meaning every
+    # consumer's CI would fail for the same reason, on our release schedule rather than their own.
+    # Bounded: two short retries, so a real outage still fails the build promptly.
+    case "$status" in
+      502|503|504)
+        if [ "$attempt" != 3 ]; then
+          echo "::notice::$API returned $status (likely a deploy) — retrying in $((attempt * 5))s" >&2
+          sleep $((attempt * 5))
+          continue
+        fi
+        ;;
+    esac
     break
   done
   printf '%s' "$out" > "$dest"
