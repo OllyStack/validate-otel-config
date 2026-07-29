@@ -123,6 +123,20 @@ contains "...and includes the migrated config" "Migrated config" "$GITHUB_STEP_S
 IN_CONFIG="$TMP/good.yaml" IN_UPGRADE_TO=0.157.0 IN_FAIL_UPGRADE=true bash "$HERE/validate.sh" > "$TMP/log8" 2>&1
 check "...and gates the build when asked to" 1 $?
 
+# --- the published copy must be complete ---------------------------------------------------------
+# sync.sh publishes an explicit file list. A runtime file missing from that list produces an action
+# that cannot run — and the breakage lands in a CUSTOMER's CI, not ours, because our own tests run
+# against this directory where the file exists. So the list is checked HERE, on every PR.
+if [ -f "$HERE/sync.sh" ]; then
+  listed="$(sed -n 's/^SYNC_FILES=(\(.*\))$/\1/p' "$HERE/sync.sh")"
+  for ref in $(grep -oE '\$GITHUB_ACTION_PATH/[A-Za-z0-9_.-]+' "$HERE/action.yml" | sed 's|.*/||' | sort -u); do
+    case " $listed " in
+      *" $ref "*) echo "  PASS  sync.sh publishes $ref" ;;
+      *) echo "  FAIL  action.yml runs $ref but sync.sh would not publish it"; FAILS=$((FAILS+1)) ;;
+    esac
+  done
+fi
+
 echo
 if [ "$FAILS" != 0 ]; then echo "FAILED — $FAILS check(s)"; exit 1; fi
 echo "all checks passed"

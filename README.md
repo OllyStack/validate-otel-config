@@ -64,9 +64,9 @@ and never fail the build — a step that fails on style is a step people delete.
 
 ## Development
 
-`bash test_action.sh` runs the suite against a stub API — offline, in seconds. It asserts which
-cases fail the build, which is the only thing an action is really judged on.
+From this directory, `bash test_action.sh` runs the suite against a stub API — offline, in seconds.
+It asserts which cases FAIL the build, which is the only thing an action is really judged on.
 
 The action is a thin client: it posts your config to the validation API and shapes the result for
-GitHub. The engine lives on the service side (`https://www.ollystack.com/api/v1/validate`), so the
-action does not need updating when a new collector version is released.
+GitHub. The engine lives on the service side (`https://www.ollystack.com/api/v1/validate`), so a new
+collector release needs no change here.
